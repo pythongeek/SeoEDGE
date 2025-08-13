@@ -1,12 +1,19 @@
 import { put } from '@vercel/blob';
-import { type NextRequest, NextResponse } from 'next/server';
 
-export async function POST(request: NextRequest): Promise<NextResponse> {
+export const config = {
+  runtime: 'edge',
+};
+
+export default async function POST(request: Request): Promise<Response> {
   const { searchParams } = new URL(request.url);
   const filename = searchParams.get('filename');
 
-  if (!filename || !request.body) {
-    return new NextResponse('No filename or body specified', { status: 400 });
+  if (!filename) {
+    return new Response('No filename specified.', { status: 400 });
+  }
+
+  if (!request.body) {
+    return new Response('No file content provided.', { status: 400 });
   }
 
   try {
@@ -14,13 +21,17 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
       access: 'public',
     });
 
-    return NextResponse.json(blob);
+    return new Response(JSON.stringify(blob), {
+        headers: { 'Content-Type': 'application/json' },
+        status: 200,
+    });
+
   } catch (error) {
     console.error('Error uploading to Vercel Blob:', error);
     let errorMessage = 'An unknown error occurred.';
     if (error instanceof Error) {
       errorMessage = error.message;
     }
-    return new NextResponse(`Error uploading file: ${errorMessage}`, { status: 500 });
+    return new Response(`Error uploading file: ${errorMessage}`, { status: 500 });
   }
 }
