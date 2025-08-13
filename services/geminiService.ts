@@ -14,11 +14,13 @@ import type {
     ChatResponse
 } from '../types';
 
-if (!process.env.API_KEY) {
-    console.warn("API_KEY environment variable not set. Using a placeholder. AI features will not work.");
+const GEMINI_API_KEY = import.meta.env.VITE_GEMINI_API_KEY;
+
+if (!GEMINI_API_KEY) {
+    console.warn("VITE_GEMINI_API_KEY environment variable not set. AI features will not work.");
 }
 
-const ai = new GoogleGenAI({ apiKey: process.env.API_KEY || "YOUR_API_KEY_HERE" });
+const ai = new GoogleGenAI({ apiKey: GEMINI_API_KEY || "" });
 
 const seoSuggestionSchema = {
     type: Type.OBJECT,
@@ -111,7 +113,7 @@ const chatResponseSchema = {
 
 
 const callGemini = async (model: string, prompt: string, systemInstruction: string, responseSchema: object) => {
-    if (!process.env.API_KEY) throw new Error("Gemini API key is not configured.");
+    if (!GEMINI_API_KEY) throw new Error("Gemini API key is not configured.");
     try {
         const response = await ai.models.generateContent({
             model: model, contents: prompt,
