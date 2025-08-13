@@ -1,9 +1,5 @@
 import { put } from '@vercel/blob';
 
-export const config = {
-  runtime: 'edge',
-};
-
 export default async function POST(request: Request): Promise<Response> {
   const { searchParams } = new URL(request.url);
   const filename = searchParams.get('filename');
