@@ -145,3 +145,31 @@ export interface ChatMessage {
     role: 'user' | 'assistant';
     content: ChatMessageContent;
 }
+
+// Interfaces for Data Ingestion V2
+export type ImportJobStatus = 'pending' | 'parsing' | 'validating' | 'importing' | 'completed' | 'failed';
+
+export interface ColumnMapping {
+  header: string; // Original header from the file
+  targetField: string | null; // The schema field it maps to, e.g., 'query'
+  confidence: number;
+}
+
+export interface ImportJob {
+  id: string;
+  userId: string; // Placeholder for future user integration
+  filename: string;
+  fileUrl: string;
+  status: ImportJobStatus;
+  createdAt: string;
+  updatedAt: string;
+  detectedSchema?: ColumnMapping[];
+  confirmedSchema?: ColumnMapping[];
+  summary?: {
+    totalRows: number;
+    importedRows: number;
+    failedRows: number;
+  };
+  error?: string;
+  errorReportUrl?: string;
+}
