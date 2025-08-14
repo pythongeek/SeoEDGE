@@ -1,5 +1,5 @@
 import { firestore } from '../firebase';
-import type { GscRawData, TrafficDeclineDiagnosis, AffectedPage } from '../../types';
+import type { GscRawData, TrafficDeclineDiagnosis, AffectedPage, TrafficDeclineSummary } from '../../types';
 
 const GSC_RAW_COLLECTION = 'gsc_raw';
 const DIAGNOSTICS_COLLECTION = 'traffic_diagnostics';
@@ -7,8 +7,9 @@ const DIAGNOSTICS_COLLECTION = 'traffic_diagnostics';
 interface PerformanceMetrics {
   clicks: number;
   impressions: number;
-  position: number;
-  count: number; // To average position
+  // Position is not in GscRawData, so we remove it from the analysis for now.
+  // We can add it back if the type is updated.
+  count: number;
 }
 
 /**
@@ -27,24 +28,18 @@ async function getPerformanceData(startDate: string, endDate: string): Promise<M
 
   snapshot.docs.forEach(doc => {
     const data = doc.data() as GscRawData;
-    const page = data.page;
+    // Corrected property: 'url' instead of 'page'. It can be optional.
+    const pageUrl = data.url;
+    if (!pageUrl) return; // Skip rows without a URL
 
-    const current = performanceMap.get(page) || { clicks: 0, impressions: 0, position: 0, count: 0 };
+    const current = performanceMap.get(pageUrl) || { clicks: 0, impressions: 0, count: 0 };
 
-    current.clicks += data.clicks;
-    current.impressions += data.impressions;
-    current.position += data.position * data.impressions; // Weighted average calculation part 1
-    current.count += data.impressions; // Weighted average calculation part 2
+    current.clicks += data.clicks || 0;
+    current.impressions += data.impressions || 0;
+    current.count += 1;
 
-    performanceMap.set(page, current);
+    performanceMap.set(pageUrl, current);
   });
-
-  // Calculate the final weighted average position
-  for (const [page, metrics] of performanceMap.entries()) {
-    if (metrics.count > 0) {
-      metrics.position = metrics.position / metrics.count;
-    }
-  }
 
   return performanceMap;
 }
@@ -58,26 +53,22 @@ async function getPerformanceData(startDate: string, endDate: string): Promise<M
 function diagnoseDecline(before: PerformanceMetrics, after: PerformanceMetrics) {
   const impressionLoss = before.impressions - after.impressions;
   const clickLoss = before.clicks - after.clicks;
-  const positionChange = after.position - before.position;
 
   const beforeCtr = before.impressions > 0 ? before.clicks / before.impressions : 0;
   const afterCtr = after.impressions > 0 ? after.clicks / after.impressions : 0;
   const ctrChange = afterCtr - beforeCtr;
 
-  // Determine the primary cause of the decline
-  let primaryCause: AffectedPage['causeCategory'] = 'Impression Loss';
+  // Determine the primary cause of the decline based on the allowed types
+  let primaryCause: AffectedPage['causeCategory'];
 
-  // A significant drop in CTR is a strong signal, even if impressions also dropped.
-  // We consider a CTR drop significant if it drops by more than 20% relative to the original.
   if (beforeCtr > 0 && (ctrChange / beforeCtr) < -0.20) {
       primaryCause = 'CTR Drop';
-  }
-  // If CTR is stable or improved, the main issue is loss of visibility (rankings).
-  else if (impressionLoss > clickLoss) {
-      primaryCause = 'Ranking Loss'; // A more specific type of impression loss
+  } else {
+      // Corrected: Map "Impression Loss" to the allowed "Ranking Loss" category
+      primaryCause = 'Ranking Loss';
   }
 
-  return { impressionLoss, clickLoss, positionChange, ctrChange, primaryCause };
+  return { impressionLoss, clickLoss, ctrChange, primaryCause };
 }
 
 /**
@@ -90,7 +81,6 @@ export async function runTrafficDeclineDiagnosis(coreUpdateDate: string, compari
 
   const updateDate = new Date(coreUpdateDate);
 
-  // Define the 'before' and 'after' periods
   const beforeEndDate = new Date(updateDate);
   beforeEndDate.setDate(updateDate.getDate() - 1);
   const beforeStartDate = new Date(beforeEndDate);
@@ -102,34 +92,37 @@ export async function runTrafficDeclineDiagnosis(coreUpdateDate: string, compari
 
   const formatDate = (d: Date) => d.toISOString().split('T')[0];
 
-  // Fetch data for both periods
+  const preUpdatePeriod = { start: formatDate(beforeStartDate), end: formatDate(beforeEndDate) };
+  const postUpdatePeriod = { start: formatDate(afterStartDate), end: formatDate(afterEndDate) };
+
   const [beforeData, afterData] = await Promise.all([
-    getPerformanceData(formatDate(beforeStartDate), formatDate(beforeEndDate)),
-    getPerformanceData(formatDate(afterStartDate), formatDate(afterEndDate))
+    getPerformanceData(preUpdatePeriod.start, preUpdatePeriod.end),
+    getPerformanceData(postUpdatePeriod.start, postUpdatePeriod.end)
   ]);
 
   const affectedPages: AffectedPage[] = [];
+  let totalImpressionsChange = 0;
+  let totalClicksChange = 0;
 
-  // Compare the data for each page present in the 'before' period
   for (const [page, beforeMetrics] of beforeData.entries()) {
-    const afterMetrics = afterData.get(page) || { clicks: 0, impressions: 0, position: 0, count: 0 };
+    const afterMetrics = afterData.get(page) || { clicks: 0, impressions: 0, count: 0 };
 
-    const impressionChange = afterMetrics.impressions - beforeMetrics.impressions;
-    const impressionChangePercent = beforeMetrics.impressions > 0 ? impressionChange / beforeMetrics.impressions : 0;
+    totalImpressionsChange += (afterMetrics.impressions - beforeMetrics.impressions);
+    totalClicksChange += (afterMetrics.clicks - beforeMetrics.clicks);
 
-    // Consider a page 'affected' if it lost more than 10% of its impressions and had at least 1000 impressions before.
+    const impressionChangePercent = beforeMetrics.impressions > 0 ? (afterMetrics.impressions - beforeMetrics.impressions) / beforeMetrics.impressions : 0;
+
     if (impressionChangePercent < -0.10 && beforeMetrics.impressions > 1000) {
-      const { impressionLoss, clickLoss, positionChange, ctrChange, primaryCause } = diagnoseDecline(beforeMetrics, afterMetrics);
+      // Corrected: Removed `positionChange`
+      const { impressionLoss, clickLoss, ctrChange, primaryCause } = diagnoseDecline(beforeMetrics, afterMetrics);
 
-      // Calculate a priority score. Higher is more important.
-      // We prioritize pages that had high impressions and lost a large percentage of them.
       const priorityScore = Math.abs(impressionLoss) * Math.abs(impressionChangePercent) / 1000;
 
+      // Corrected: Create an object that matches the `AffectedPage` type
       affectedPages.push({
         url: page,
         impressionLoss,
         clickLoss,
-        positionChange,
         ctrChange,
         causeCategory: primaryCause,
         priorityScore: Math.round(priorityScore),
@@ -137,24 +130,32 @@ export async function runTrafficDeclineDiagnosis(coreUpdateDate: string, compari
     }
   }
 
-  // Sort by the highest priority
   affectedPages.sort((a, b) => b.priorityScore - a.priorityScore);
 
-  const diagnosisResult: TrafficDeclineDiagnosis = {
-    id: `diag_${coreUpdateDate}_${comparisonWindow}`,
-    coreUpdateDate,
-    comparisonWindow,
-    createdAt: new Date().toISOString(),
-    status: 'completed',
-    affectedPages: affectedPages.slice(0, 50), // Limit to top 50 for performance
-    summary: {
-      totalpagesAnalyzed: beforeData.size,
-      affectedPagesCount: affectedPages.length,
-    }
+  const beforeTotalImpressions = Array.from(beforeData.values()).reduce((sum, m) => sum + m.impressions, 0);
+  const afterTotalImpressions = Array.from(afterData.values()).reduce((sum, m) => sum + m.impressions, 0);
+  const beforeTotalClicks = Array.from(beforeData.values()).reduce((sum, m) => sum + m.clicks, 0);
+  const afterTotalClicks = Array.from(afterData.values()).reduce((sum, m) => sum + m.clicks, 0);
+  const beforeTotalCtr = beforeTotalImpressions > 0 ? beforeTotalClicks / beforeTotalImpressions : 0;
+  const afterTotalCtr = afterTotalImpressions > 0 ? afterTotalClicks / afterTotalImpressions : 0;
+
+  // Corrected: Create a summary object that matches the `TrafficDeclineSummary` type
+  const summary: TrafficDeclineSummary = {
+      impressionsChange: totalImpressionsChange,
+      clicksChange: totalClicksChange,
+      ctrChange: afterTotalCtr - beforeTotalCtr,
+      preUpdatePeriod,
+      postUpdatePeriod,
   };
 
-  // Save the result to Firestore
-  await firestore.collection(DIAGNOSTICS_COLLECTION).doc(diagnosisResult.id).set(diagnosisResult);
+  const diagnosisResult: TrafficDeclineDiagnosis = {
+    summary,
+    affectedPages: affectedPages.slice(0, 50),
+  };
+
+  // Corrected: Create the ID separately and do not add it to the diagnosis object itself.
+  const diagnosisId = `diag_${coreUpdateDate}_${comparisonWindow}`;
+  await firestore.collection(DIAGNOSTICS_COLLECTION).doc(diagnosisId).set(diagnosisResult);
 
   console.log(`Diagnosis complete. Found ${affectedPages.length} affected pages. Results saved to Firestore.`);
   return diagnosisResult;
