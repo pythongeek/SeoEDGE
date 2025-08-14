@@ -10,6 +10,8 @@ import { Header } from './components/Header';
 import { getSeoSuggestions, getWorkflowSuggestions, generateTopicsFromRegex, analyzeStoriesEffectiveness, analyzeDiscoverNewsPerformance, getChatResponse } from './services/geminiService';
 import { fetchPageData, fetchTrafficDeclineDiagnosis, mockEditors, mockGscRawData } from './services/mockDataService';
 import type { SeoSuggestion, PageData, TrafficDeclineDiagnosis as DiagnosisData, Task, TopicCluster, StoriesAnalysis, DiscoverNewsAnalysis, ChatMessage } from './types';
+import { db } from './services/firebase-client';
+import { doc, onSnapshot } from 'firebase/firestore';
 import { LightBulbIcon } from './components/icons/LightBulbIcon';
 import { ArrowTrendingDownIcon } from './components/icons/ArrowTrendingDownIcon';
 import { CodeBracketSquareIcon } from './components/icons/CodeBracketSquareIcon';
@@ -96,18 +98,59 @@ const App: React.FC = () => {
     setDiagnosis(null);
     setCreatedTasks(null);
     setWorkflowError(null);
-    
+
     try {
-      await new Promise(resolve => setTimeout(resolve, 1500));
-      const result = fetchTrafficDeclineDiagnosis(coreUpdateDate, comparisonWindow);
-      setDiagnosis(result);
-    } catch (err) {
-       console.error(err);
-       setDiagnosisError(err instanceof Error ? err.message : 'An unknown error occurred.');
-    } finally {
+      // 1. Trigger the backend diagnosis job
+      const response = await fetch('/api/diagnosis/trigger', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          // The secret should be stored in a Vite env var
+          'x-admin-secret': import.meta.env.VITE_ADMIN_SHARED_SECRET || '',
+        },
+        body: JSON.stringify({ coreUpdateDate, comparisonWindow }),
+      });
+
+      if (response.status !== 202) {
+        const errorData = await response.json();
+        throw new Error(errorData.message || 'Failed to start diagnosis job.');
+      }
+
+      // 2. Listen for the results in real-time from Firestore
+      const diagnosisId = `diag_${coreUpdateDate}_${comparisonWindow}`;
+      const docRef = doc(db, "traffic_diagnostics", diagnosisId);
+
+      const unsubscribe = onSnapshot(docRef, (docSnap) => {
+        if (docSnap.exists()) {
+          console.log("Diagnosis data received from Firestore:", docSnap.data());
+          setDiagnosis(docSnap.data() as DiagnosisData);
+          setIsDiagnosisLoading(false);
+          unsubscribe(); // Stop listening once we have the data
+        } else {
+          console.log("Waiting for diagnosis results...");
+        }
+      }, (error) => {
+        console.error("Error listening for diagnosis results:", error);
+        setDiagnosisError("Failed to fetch diagnosis results from the database.");
         setIsDiagnosisLoading(false);
+        unsubscribe();
+      });
+
+      // Set a timeout in case the results never arrive
+      setTimeout(() => {
+        unsubscribe();
+        if (isDiagnosisLoading) {
+            setIsDiagnosisLoading(false);
+            setDiagnosisError("Diagnosis timed out. The process may be taking longer than expected on the server. Please check the database later.");
+        }
+      }, 90000); // 90-second timeout
+
+    } catch (err) {
+      console.error(err);
+      setDiagnosisError(err instanceof Error ? err.message : 'An unknown error occurred.');
+      setIsDiagnosisLoading(false);
     }
-  }, []);
+  }, [isDiagnosisLoading]); // isDiagnosisLoading dependency to prevent race conditions on timeout
 
   const handleCreateWorkflow = useCallback(async (diagnosisData: DiagnosisData) => {
     setIsWorkflowLoading(true);
