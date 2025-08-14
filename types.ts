@@ -63,11 +63,16 @@ export interface Task {
 }
 
 export interface GscRawData {
+    siteUrl: string;
+    date: string;
     query: string;
+    url: string;
+    country: string;
+    device: string;
     impressions: number;
-    url?: string;
-    clicks?: number;
-    ctr?: number;
+    clicks: number;
+    ctr: number;
+    position: number;
     searchAppearance?: 'web_stories' | 'web' | 'discover' | 'google_news_showcase';
 }
 
