@@ -1,4 +1,4 @@
-import { runTrafficDeclineDiagnosis } from '../services/jobs/traffic-analyzer';
+import { runTrafficDeclineDiagnosis } from '../../services/jobs/traffic-analyzer';
 import type { VercelRequest, VercelResponse } from '@vercel/node';
 
 // This is a simplified authorization check. In a real-world app,
