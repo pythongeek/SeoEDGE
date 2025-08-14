@@ -1,4 +1,4 @@
-import { runDailyAggregation } from '../services/jobs/aggregator';
+import { runDailyAggregation } from '../../services/jobs/aggregator';
 import type { VercelRequest, VercelResponse } from '@vercel/node';
 
 function isAuthorized(request: VercelRequest): boolean {

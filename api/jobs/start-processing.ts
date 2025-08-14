@@ -1,4 +1,4 @@
-import { runInitialParse } from '../services/jobs/parser';
+import { runInitialParse } from '../../services/jobs/parser';
 import type { VercelRequest, VercelResponse } from '@vercel/node';
 
 function isAuthorized(request: VercelRequest): boolean {
