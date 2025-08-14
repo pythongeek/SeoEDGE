@@ -1,8 +1,8 @@
 import { put } from '@vercel/blob';
-import { firestore } from '../../services/firebase';
+import { firestore } from '../services/firebase';
 import { nanoid } from 'nanoid'; // A small library for generating unique IDs
 import type { VercelRequest, VercelResponse } from '@vercel/node';
-import type { ImportJob } from '../../types';
+import type { ImportJob } from '../types';
 
 const JOBS_COLLECTION = 'importJobs';
 
