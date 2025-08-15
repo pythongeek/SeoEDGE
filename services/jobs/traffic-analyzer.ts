@@ -1,3 +1,4 @@
+import admin from 'firebase-admin';
 import { firestore } from '../firebase';
 import type { GscRawData, TrafficDeclineDiagnosis, AffectedPage, TrafficDeclineSummary } from '../../types';
 
