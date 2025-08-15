@@ -176,18 +176,20 @@ function normalizeAndValidateRow(row: Record<string, any>, confirmedSchema: Colu
                 else { normalizedData[mapping.targetField] = num; }
                 break;
             case 'ctr':
-                // CTR is often a percentage string, e.g., "5.5%"
                 const ctrStr = String(rawValue).replace('%', '').trim();
                 const ctrNum = Number(ctrStr);
                 if (isNaN(ctrNum)) { hasError = true; }
-                else { normalizedData.ctr = ctrNum / 100; } // Store as a decimal
+                else { normalizedData.ctr = ctrNum / 100; }
                 break;
-            case 'query':
-            case 'siteUrl':
-            case 'country':
-            case 'device':
             case 'searchAppearance':
-                normalizedData[mapping.targetField] = String(rawValue).trim();
+                const val = String(rawValue).trim();
+                const allowedValues = ['web', 'web_stories', 'discover', 'google_news_showcase'];
+                if (allowedValues.includes(val)) {
+                    normalizedData.searchAppearance = val as GscRawData['searchAppearance'];
+                }
+                break;
+            default: // Handles query, siteUrl, country, device
+                normalizedData[mapping.targetField as keyof GscRawData] = String(rawValue).trim();
                 break;
         }
     });
@@ -211,10 +213,17 @@ export async function runFinalProcessing(jobId: string, confirmedSchema: ColumnM
 
   const fileContent = await fetchFileContent(jobData.fileUrl);
   const fileType = jobData.filename.split('.').pop()?.toLowerCase();
-  if (fileType !== 'csv' && fileType !== 'txt') {
+
+  let records: Record<string, any>[] = [];
+  if (fileType === 'csv' || fileType === 'txt') {
+    records = Papa.parse(new TextDecoder().decode(fileContent), { header: true, skipEmptyLines: true }).data as any[];
+  } else if (fileType === 'xlsx') {
+    const workbook = XLSX.read(fileContent, { type: 'buffer' });
+    const sheetName = workbook.SheetNames[0];
+    records = XLSX.utils.sheet_to_json(workbook.Sheets[sheetName]);
+  } else {
     throw new Error(`Unsupported file type for final processing: ${fileType}.`);
   }
-  const records: Record<string, any>[] = Papa.parse(new TextDecoder().decode(fileContent), { header: true, skipEmptyLines: true }).data as any[];
 
   let batch = firestore.batch();
   let itemsInBatch = 0;
