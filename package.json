@@ -17,8 +17,7 @@
     "firebase-admin": "^12.1.0",
     "googleapis": "^137.1.0",
     "nanoid": "^5.0.7",
-    "papaparse": "^5.4.1",
-    "xlsx": "^0.18.5"
+    "papaparse": "^5.4.1"
   },
   "devDependencies": {
     "@types/node": "^22.14.0",

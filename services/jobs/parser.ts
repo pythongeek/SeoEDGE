@@ -2,7 +2,6 @@ import { firestore } from '../firebase';
 import { head } from '@vercel/blob';
 import { put as vercelPut } from '@vercel/blob';
 import Papa from 'papaparse';
-import * as XLSX from 'xlsx';
 import crypto from 'crypto';
 import type { ImportJob, ColumnMapping, GscRawData } from '../../types';
 import { normalizeUrl } from '../ingestion/url-normalizer';
@@ -92,16 +91,8 @@ function parseFileSample(fileContent: ArrayBuffer, filename: string): { headers:
     const text = new TextDecoder().decode(fileContent);
     const result = Papa.parse(text, { header: true, preview: 5, skipEmptyLines: true });
     return { headers: result.meta.fields || [], sample: result.data as Record<string, any>[] };
-  } else if (fileType === 'xlsx') {
-    const workbook = XLSX.read(fileContent, { type: 'buffer' });
-    const sheetName = workbook.SheetNames[0];
-    const worksheet = workbook.Sheets[sheetName];
-    const sample = XLSX.utils.sheet_to_json(worksheet, { header: 1, range: 'A1:Z6' });
-    const headers = (sample[0] as string[]) || [];
-    const dataAsObjects = XLSX.utils.sheet_to_json(worksheet).slice(0, 5);
-    return { headers, sample: dataAsObjects as Record<string, any>[] };
   } else {
-    throw new Error(`Unsupported file type: ${fileType}`);
+    throw new Error(`Unsupported file type: ${fileType}. Please upload a CSV or TXT file for now.`);
   }
 }
 
@@ -219,12 +210,11 @@ export async function runFinalProcessing(jobId: string, confirmedSchema: ColumnM
   const jobData = jobDoc.data() as ImportJob;
 
   const fileContent = await fetchFileContent(jobData.fileUrl);
-  // NOTE: For very large XLSX files, a streaming parser would be better.
-  // For now, we read the whole file, which is fine for moderately sized files.
   const fileType = jobData.filename.split('.').pop()?.toLowerCase();
-  const records: Record<string, any>[] = (fileType === 'csv' || fileType === 'txt')
-    ? Papa.parse(new TextDecoder().decode(fileContent), { header: true, skipEmptyLines: true }).data as any[]
-    : XLSX.utils.sheet_to_json(XLSX.read(fileContent, { type: 'buffer' }).Sheets[XLSX.read(fileContent, { type: 'buffer' }).SheetNames[0]]);
+  if (fileType !== 'csv' && fileType !== 'txt') {
+    throw new Error(`Unsupported file type for final processing: ${fileType}.`);
+  }
+  const records: Record<string, any>[] = Papa.parse(new TextDecoder().decode(fileContent), { header: true, skipEmptyLines: true }).data as any[];
 
   let batch = firestore.batch();
   let itemsInBatch = 0;
