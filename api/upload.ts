@@ -1,10 +1,17 @@
 import { put } from '@vercel/blob';
 import { firestore } from '../services/firebase';
-import { nanoid } from 'nanoid'; // A small library for generating unique IDs
+import { nanoid } from 'nanoid';
 import type { VercelRequest, VercelResponse } from '@vercel/node';
 import type { ImportJob } from '../types';
+import { buffer } from '../utils/api-helpers';
 
 const JOBS_COLLECTION = 'importJobs';
+
+export const config = {
+  api: {
+    bodyParser: false, // We need to disable the default body parser to handle the raw stream
+  },
+};
 
 export default async function handler(
   request: VercelRequest,
@@ -14,21 +21,18 @@ export default async function handler(
     return response.status(405).json({ message: 'Method Not Allowed' });
   }
 
-  // We get the filename from a header instead of a query param now.
-  // This is a common pattern for file uploads.
   const filename = request.headers['x-vercel-filename'] as string || 'unknown-file';
-
-  if (!request.body) {
-    return response.status(400).json({ message: 'No file content provided.' });
-  }
-
   const jobId = nanoid();
   const blobPath = `uploads/${jobId}/${filename}`;
 
   try {
-    // 1. Upload the file to Vercel Blob storage
-    const blob = await put(blobPath, request.body, {
-      access: 'public', // The file needs to be public for the backend parser to fetch it
+    // 1. Buffer the raw request body into a single Buffer
+    const fileBuffer = await buffer(request);
+
+    // 2. Upload the buffered file to Vercel Blob storage
+    const blob = await put(blobPath, fileBuffer, {
+      access: 'public',
+      contentType: request.headers['content-type'], // Pass content type for correct handling
     });
 
     // 2. Create the initial job document in Firestore
