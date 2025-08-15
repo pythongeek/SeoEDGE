@@ -2,6 +2,7 @@ import { firestore } from '../firebase';
 import { head } from '@vercel/blob';
 import { put as vercelPut } from '@vercel/blob';
 import Papa from 'papaparse';
+import * as XLSX from 'xlsx';
 import crypto from 'crypto';
 import type { ImportJob, ColumnMapping, GscRawData } from '../../types';
 import { normalizeUrl } from '../ingestion/url-normalizer';
@@ -188,8 +189,11 @@ function normalizeAndValidateRow(row: Record<string, any>, confirmedSchema: Colu
                     normalizedData.searchAppearance = val as GscRawData['searchAppearance'];
                 }
                 break;
-            default: // Handles query, siteUrl, country, device
-                normalizedData[mapping.targetField as keyof GscRawData] = String(rawValue).trim();
+            case 'query':
+            case 'siteUrl':
+            case 'country':
+            case 'device':
+                normalizedData[mapping.targetField] = String(rawValue).trim();
                 break;
         }
     });
