@@ -191,8 +191,12 @@ function normalizeAndValidateRow(row: Record<string, any>, confirmedSchema: Colu
                 if (isNaN(ctrNum)) { hasError = true; }
                 else { normalizedData.ctr = ctrNum / 100; } // Store as a decimal
                 break;
-            default:
-                normalizedData[mapping.targetField as keyof GscRawData] = String(rawValue).trim();
+            case 'query':
+            case 'siteUrl':
+            case 'country':
+            case 'device':
+            case 'searchAppearance':
+                normalizedData[mapping.targetField] = String(rawValue).trim();
                 break;
         }
     });
