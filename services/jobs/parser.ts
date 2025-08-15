@@ -1,8 +1,11 @@
 import { firestore } from '../firebase';
 import { head } from '@vercel/blob';
+import { put as vercelPut } from '@vercel/blob';
 import Papa from 'papaparse';
 import * as XLSX from 'xlsx';
-import type { ImportJob, ColumnMapping } from '../../types';
+import crypto from 'crypto';
+import type { ImportJob, ColumnMapping, GscRawData } from '../../types';
+import { normalizeUrl } from '../ingestion/url-normalizer';
 
 const JOBS_COLLECTION = 'importJobs';
 
@@ -142,4 +145,138 @@ export async function runInitialParse(jobId: string) {
       updatedAt: new Date().toISOString(),
     });
   }
+}
+
+
+// --- Final Processing Logic ---
+
+const GSC_RAW_COLLECTION = 'gsc_raw';
+const FIRESTORE_BATCH_SIZE = 450;
+
+/**
+ * Normalizes and validates a single row of data based on the confirmed schema.
+ * @param row A single row object from the parsed file.
+ * @param confirmedSchema The user-confirmed column mapping.
+ * @returns A normalized GscRawData object or null if validation fails.
+ */
+function normalizeAndValidateRow(row: Record<string, any>, confirmedSchema: ColumnMapping[]): Partial<GscRawData> | null {
+    const normalizedData: Partial<GscRawData> = {};
+    let hasError = false;
+
+    confirmedSchema.forEach(mapping => {
+        if (!mapping.targetField) return; // Ignore columns the user skipped
+
+        const rawValue = row[mapping.header];
+
+        switch (mapping.targetField) {
+            case 'date':
+                const date = new Date(rawValue);
+                if (isNaN(date.getTime())) { hasError = true; }
+                else { normalizedData.date = date.toISOString().split('T')[0]; }
+                break;
+            case 'url':
+                normalizedData.url = normalizeUrl(String(rawValue));
+                break;
+            case 'impressions':
+            case 'clicks':
+            case 'position':
+                const num = Number(String(rawValue).replace(/,/g, ''));
+                if (isNaN(num)) { hasError = true; }
+                else { normalizedData[mapping.targetField] = num; }
+                break;
+            case 'ctr':
+                // CTR is often a percentage string, e.g., "5.5%"
+                const ctrStr = String(rawValue).replace('%', '').trim();
+                const ctrNum = Number(ctrStr);
+                if (isNaN(ctrNum)) { hasError = true; }
+                else { normalizedData.ctr = ctrNum / 100; } // Store as a decimal
+                break;
+            default:
+                normalizedData[mapping.targetField as keyof GscRawData] = String(rawValue).trim();
+                break;
+        }
+    });
+
+    // Basic validation: ensure key fields are present
+    if (!normalizedData.date || !normalizedData.url || !normalizedData.query) {
+        hasError = true;
+    }
+
+    return hasError ? null : normalizedData;
+}
+
+
+export async function runFinalProcessing(jobId: string, confirmedSchema: ColumnMapping[]) {
+  const jobRef = firestore.collection(JOBS_COLLECTION).doc(jobId);
+  await jobRef.update({ status: 'importing', confirmedSchema, updatedAt: new Date().toISOString() });
+
+  const jobDoc = await jobRef.get();
+  if (!jobDoc.exists) throw new Error(`Job ${jobId} not found.`);
+  const jobData = jobDoc.data() as ImportJob;
+
+  const fileContent = await fetchFileContent(jobData.fileUrl);
+  // NOTE: For very large XLSX files, a streaming parser would be better.
+  // For now, we read the whole file, which is fine for moderately sized files.
+  const fileType = jobData.filename.split('.').pop()?.toLowerCase();
+  const records: Record<string, any>[] = (fileType === 'csv' || fileType === 'txt')
+    ? Papa.parse(new TextDecoder().decode(fileContent), { header: true, skipEmptyLines: true }).data as any[]
+    : XLSX.utils.sheet_to_json(XLSX.read(fileContent, { type: 'buffer' }).Sheets[XLSX.read(fileContent, { type: 'buffer' }).SheetNames[0]]);
+
+  let batch = firestore.batch();
+  let itemsInBatch = 0;
+  const errorRows: any[] = [];
+  let importedCount = 0;
+
+  for (const record of records) {
+    const normalizedRow = normalizeAndValidateRow(record, confirmedSchema);
+
+    if (normalizedRow) {
+        const sourceTag = `upload_${jobId.substring(0, 8)}`;
+        const finalData = { ...normalizedRow, source: sourceTag, updatedAt: new Date().toISOString() };
+
+        // Create a unique ID for deduplication
+        const keyString = `${finalData.date}-${finalData.url}-${finalData.query}`;
+        const docId = crypto.createHash('md5').update(keyString).digest('hex');
+
+        const docRef = firestore.collection(GSC_RAW_COLLECTION).doc(docId);
+        batch.set(docRef, finalData, { merge: true }); // Use merge to upsert
+        itemsInBatch++;
+        importedCount++;
+    } else {
+        errorRows.push(record);
+    }
+
+    if (itemsInBatch >= FIRESTORE_BATCH_SIZE) {
+        await batch.commit();
+        batch = firestore.batch();
+        itemsInBatch = 0;
+    }
+  }
+
+  if (itemsInBatch > 0) {
+    await batch.commit();
+  }
+
+  // Final job update
+  const summary = {
+    totalRows: records.length,
+    importedRows: importedCount,
+    failedRows: errorRows.length,
+  };
+
+  let errorReportUrl: string | undefined = undefined;
+  if (errorRows.length > 0) {
+    const errorCsv = Papa.unparse(errorRows);
+    const errorBlob = await vercelPut(`error_reports/${jobId}-errors.csv`, errorCsv, { access: 'public', contentType: 'text/csv' });
+    errorReportUrl = errorBlob.url;
+  }
+
+  await jobRef.update({
+      status: 'completed',
+      updatedAt: new Date().toISOString(),
+      summary,
+      errorReportUrl,
+  });
+
+  console.log(`Final processing complete for job ${jobId}. Imported: ${summary.importedRows}, Failed: ${summary.failedRows}`);
 }
