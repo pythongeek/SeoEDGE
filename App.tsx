@@ -18,9 +18,13 @@ import { CodeBracketSquareIcon } from './components/icons/CodeBracketSquareIcon'
 import { BookOpenIcon } from './components/icons/BookOpenIcon';
 import { NewspaperIcon } from './components/icons/NewspaperIcon';
 import { ChatBubbleLeftRightIcon } from './components/icons/ChatBubbleLeftRightIcon';
+import { ArrowUpTrayIcon } from './components/icons/ArrowUpTrayIcon';
+import { FileUploader } from './components/FileUploader';
+import { ColumnMapper } from './components/ColumnMapper';
+import type { ColumnMapping } from './types';
 
 
-type ActiveTab = 'chat' | 'companion' | 'diagnosis' | 'regex' | 'stories' | 'discover';
+type ActiveTab = 'chat' | 'ingestion' | 'companion' | 'diagnosis' | 'regex' | 'stories' | 'discover';
 
 const App: React.FC = () => {
   // State for SEO Companion
@@ -68,7 +72,37 @@ const App: React.FC = () => {
   ]);
 
   // App-level state
-  const [activeTab, setActiveTab] = useState<ActiveTab>('chat');
+  const [activeTab, setActiveTab] = useState<ActiveTab>('ingestion');
+
+  // State for Data Ingestion V2
+  const [activeJobId, setActiveJobId] = useState<string | null>(null);
+  const [ingestionError, setIngestionError] = useState<string | null>(null);
+  const [isProcessing, setIsProcessing] = useState<boolean>(false); // For final processing step
+
+  const handleUploadSuccess = useCallback((jobId: string) => {
+    setIngestionError(null);
+    setActiveJobId(jobId);
+    // The ColumnMapper will now take over, listening to this job ID
+  }, []);
+
+  const handleUploadError = useCallback((error: string) => {
+    setIngestionError(error);
+    setActiveJobId(null);
+  }, []);
+
+  const handleConfirmMapping = useCallback(async (jobId: string, confirmedSchema: ColumnMapping[]) => {
+    setIsProcessing(true);
+    setIngestionError(null);
+    console.log('Confirmed mapping for job:', jobId, confirmedSchema);
+    // In Phase 3, this will call the backend processing API.
+    // For now, we'll just simulate success.
+    await new Promise(resolve => setTimeout(resolve, 2000));
+    alert(`Phase 3 Triggered! Job ${jobId} would now be processed with the confirmed schema.`);
+    setIsProcessing(false);
+    // Reset the UI
+    setActiveJobId(null);
+  }, []);
+
 
   const handleAnalysis = useCallback(async (url: string) => {
     if (!url) {
@@ -301,6 +335,10 @@ const App: React.FC = () => {
       <main className="container mx-auto px-4 py-8">
         <div className="max-w-4xl mx-auto">
           <div className="mb-8 p-1 bg-gray-800 rounded-lg flex flex-wrap items-center justify-start gap-1" role="tablist" aria-label="Feature tabs">
+             <TabButton tabId="ingestion">
+                <ArrowUpTrayIcon className="w-5 h-5" />
+                Data Ingestion
+             </TabButton>
              <TabButton tabId="chat">
                 <ChatBubbleLeftRightIcon className="w-5 h-5" />
                 AI Chat
@@ -333,6 +371,30 @@ const App: React.FC = () => {
                 isResponding={isChatResponding}
                 onSendMessage={handleSendMessage}
               />
+          </div>
+
+          <div role="tabpanel" hidden={activeTab !== 'ingestion'}>
+            <div className="space-y-6">
+              <h2 className="text-3xl font-bold text-white">Data Ingestion</h2>
+              {ingestionError && (
+                <div className="text-red-400 bg-red-900/50 p-4 rounded-lg">
+                  <p className="font-bold">Upload Failed:</p>
+                  <p>{ingestionError}</p>
+                </div>
+              )}
+              {!activeJobId ? (
+                <FileUploader
+                  onUploadSuccess={handleUploadSuccess}
+                  onUploadError={handleUploadError}
+                />
+              ) : (
+                <ColumnMapper
+                  jobId={activeJobId}
+                  onConfirmMapping={handleConfirmMapping}
+                  isProcessing={isProcessing}
+                />
+              )}
+            </div>
           </div>
           
           <div role="tabpanel" hidden={activeTab !== 'companion'}>
