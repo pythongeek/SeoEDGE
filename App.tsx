@@ -93,14 +93,32 @@ const App: React.FC = () => {
   const handleConfirmMapping = useCallback(async (jobId: string, confirmedSchema: ColumnMapping[]) => {
     setIsProcessing(true);
     setIngestionError(null);
-    console.log('Confirmed mapping for job:', jobId, confirmedSchema);
-    // In Phase 3, this will call the backend processing API.
-    // For now, we'll just simulate success.
-    await new Promise(resolve => setTimeout(resolve, 2000));
-    alert(`Phase 3 Triggered! Job ${jobId} would now be processed with the confirmed schema.`);
-    setIsProcessing(false);
-    // Reset the UI
-    setActiveJobId(null);
+
+    try {
+      const response = await fetch('/api/jobs/process', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'x-admin-secret': import.meta.env.VITE_ADMIN_SHARED_SECRET || '',
+        },
+        body: JSON.stringify({ jobId, confirmedSchema }),
+      });
+
+      if (response.status !== 202) {
+        const errorData = await response.json();
+        throw new Error(errorData.message || 'Failed to start final processing job.');
+      }
+
+      // The job is now processing in the background. We can reset the UI.
+      alert('Mapping confirmed! The file is now being imported in the background. You can upload another file.');
+      setActiveJobId(null);
+
+    } catch (err) {
+      console.error(err);
+      setIngestionError(err instanceof Error ? err.message : 'An unknown error occurred.');
+    } finally {
+      setIsProcessing(false);
+    }
   }, []);
 
 
