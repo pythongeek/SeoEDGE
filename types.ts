@@ -28,6 +28,7 @@ export interface TrafficDeclineSummary {
   ctrChange: number;
   preUpdatePeriod: { start: string; end: string };
   postUpdatePeriod: { start: string; end: string };
+  declineType?: 'Widespread' | 'Isolated';
 }
 
 export interface AffectedPage {
@@ -37,11 +38,24 @@ export interface AffectedPage {
   ctrChange: number;
   causeCategory: 'Ranking Loss' | 'CTR Drop' | 'Seasonal Decline';
   priorityScore: number;
+  root_cause_hypothesis?: string;
+}
+
+export interface VisualizationData {
+    timeSeries: {
+        date: string;
+        period: 'before' | 'after';
+        clicks: number;
+        impressions: number;
+    }[];
+    clickLossByCategory: { category: string; loss: number }[];
+    clickLossByDevice: { device: string; loss: number }[];
 }
 
 export interface TrafficDeclineDiagnosis {
   summary: TrafficDeclineSummary;
   affectedPages: AffectedPage[];
+  visualizationData: VisualizationData;
 }
 
 export interface Editor {
