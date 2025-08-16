@@ -1,5 +1,5 @@
-import { firestore } from '../firebase';
-import type { GscRawData } from '../../types';
+import { firestore } from '../firebase.js';
+import type { GscRawData } from '../../types.js';
 
 const GSC_RAW_COLLECTION = 'gsc_raw';
 const ANALYTICS_AGG_COLLECTION = 'analytics_agg';

@@ -1,6 +1,6 @@
 import admin from 'firebase-admin';
-import { firestore } from '../firebase';
-import type { GscRawData, TrafficDeclineDiagnosis, AffectedPage, TrafficDeclineSummary } from '../../types';
+import { firestore } from '../firebase.js';
+import type { GscRawData, TrafficDeclineDiagnosis, AffectedPage, TrafficDeclineSummary, VisualizationData } from '../../types.js';
 
 const GSC_RAW_COLLECTION = 'gsc_raw';
 const DIAGNOSTICS_COLLECTION = 'traffic_diagnostics';

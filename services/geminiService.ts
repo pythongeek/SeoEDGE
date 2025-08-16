@@ -10,7 +10,7 @@ import type {
     StoriesAnalysis,
     DiscoverNewsAnalysis,
     ChatResponse
-} from '../types';
+} from '../types.js';
 
 // Schemas define the expected JSON structure for the AI's response.
 // These are now sent to our backend, which forwards them to the AI.
