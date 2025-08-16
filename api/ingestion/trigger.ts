@@ -1,4 +1,4 @@
-import { fetchAndStoreGscData } from '../../services/ingestion/gsc-connector';
+import { fetchAndStoreGscData } from '../../services/ingestion/gsc-connector.js';
 import type { VercelRequest, VercelResponse } from '@vercel/node';
 
 // TODO: Implement proper admin role-based authentication.
