@@ -1,6 +1,6 @@
 import { google } from 'googleapis';
-import { firestore } from '../firebase';
-import { normalizeUrl } from './url-normalizer';
+import { firestore } from '../firebase.js';
+import { normalizeUrl } from './url-normalizer.js';
 
 const searchconsole = google.searchconsole('v1');
 const GSC_RAW_COLLECTION = 'gsc_raw';
