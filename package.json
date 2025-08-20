@@ -22,7 +22,8 @@
   "homepage": "https://github.com/pythongeek/SeoEdge#readme",
   "dependencies": {
     "@googleapis/searchconsole": "^4.0.0",
-    "firebase-admin": "^13.4.0"
+    "firebase-admin": "^13.4.0",
+    "googleapis": "^156.0.0"
   },
   "devDependencies": {
     "@types/jest": "^30.0.0",

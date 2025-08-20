@@ -1,7 +1,6 @@
-import { searchconsole_v1, searchconsole } from '@googleapis/searchconsole';
+import { google } from 'googleapis';
 import { initializeApp, cert, ServiceAccount } from 'firebase-admin/app';
 import { getFirestore, FieldValue } from 'firebase-admin/firestore';
-import { GoogleAuth } from 'google-auth-library';
 
 // --- Configuration & Initialization ---
 
@@ -14,6 +13,7 @@ if (!serviceAccountBase64) {
 
 let serviceAccount: ServiceAccount;
 try {
+    // The JSON object from base64 needs to be cast to any to satisfy fromJSON
     serviceAccount = JSON.parse(Buffer.from(serviceAccountBase64, 'base64').toString('utf-8'));
 } catch (error) {
     console.error('FATAL: Could not parse Firebase service account credentials. Check if the Base64 string is valid.', error);
@@ -27,24 +27,21 @@ initializeApp({
 const db = getFirestore();
 
 // Initialize the Google Search Console API client.
-const auth = new GoogleAuth({
-    credentials: {
-        // FIX: Use camelCase properties from the ServiceAccount type
-        client_email: serviceAccount.clientEmail,
-        private_key: serviceAccount.privateKey,
-    },
-    scopes: ['https://www.googleapis.com/auth/webmasters.readonly'],
-});
+// FIX: Use the main 'googleapis' package for robust authentication.
+const auth = google.auth.fromJSON(serviceAccount as any);
+auth.scopes = ['https://www.googleapis.com/auth/webmasters.readonly'];
 
-const gscClient = searchconsole({
+const gscClient = google.searchconsole({
     version: 'v1',
     auth,
 });
 
-
 // --- Type Definitions ---
 
-type GscApiRow = searchconsole_v1.Schema$ApiDataRow;
+// Get the specific type for a row from the googleapis library itself.
+type GscApiRow = google.searchconsole_v1.Schema$ApiDataRow;
+type SearchConsoleApiClient = google.searchconsole_v1.Searchconsole;
+
 
 // Our Firestore document schema
 interface GscFirestoreDoc {
@@ -109,7 +106,7 @@ export async function ingestGSCData(
  * Data Fetching Function (fetchGSCDataForDate).
  */
 export async function fetchGSCDataForDate(
-    gscClient: searchconsole_v1.Searchconsole,
+    gscClient: SearchConsoleApiClient,
     siteUrl: string,
     date: string
 ): Promise<GscApiRow[]> {
@@ -125,7 +122,7 @@ export async function fetchGSCDataForDate(
 
     while (hasMore) {
         try {
-            const request: searchconsole_v1.Params$Resource$Searchanalytics$Query = {
+            const request: google.searchconsole_v1.Params$Resource$Searchanalytics$Query = {
                 siteUrl,
                 requestBody: {
                     startDate: date,
