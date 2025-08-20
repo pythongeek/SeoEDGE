@@ -27,24 +27,25 @@ initializeApp({
 const db = getFirestore();
 
 // Initialize the Google Search Console API client.
+// FIX: Explicitly pass credentials to avoid type conflicts between Firebase and Google Auth libraries.
+const auth = new GoogleAuth({
+    credentials: {
+        client_email: serviceAccount.client_email,
+        private_key: serviceAccount.private_key,
+    },
+    scopes: ['https://www.googleapis.com/auth/webmasters.readonly'],
+});
+
 const gscClient = searchconsole({
     version: 'v1',
-    auth: new GoogleAuth({
-        credentials: serviceAccount,
-        scopes: ['https://www.googleapis.com/auth/webmasters.readonly'],
-    }),
+    auth,
 });
+
 
 // --- Type Definitions ---
 
-// Based on GSC API response for searchanalytics.query
-interface GscApiRow {
-    keys?: (string | null)[];
-    clicks?: number;
-    impressions?: number;
-    ctr?: number;
-    position?: number;
-}
+// FIX: Use the official type from the library to avoid mismatches.
+type GscApiRow = searchconsole_v1.Schema$ApiDataRow;
 
 // Our Firestore document schema
 interface GscFirestoreDoc {
@@ -65,17 +66,6 @@ interface GscFirestoreDoc {
 
 /**
  * Main orchestration function (ingestGSCData).
- * This is the entry point of the service.
- * It accepts a siteUrl, startDate, and endDate as input.
- * It will loop through each day in the specified date range.
- * For each day, it will call a dedicated function to fetch all data from the GSC API.
- * It will then process the returned data, normalize it, and write it to Firestore in batches.
- * It must include clear logging for progress and error reporting.
- *
- * @param siteUrl The site property from GSC, e.g., 'sc-domain:example.com'
- * @param startDate The start date of the report in YYYY-MM-DD format.
- * @param endDate The end date of the report in YYYY-MM-DD format.
- * @returns An object with the success status and total rows written.
  */
 export async function ingestGSCData(
     siteUrl: string,
@@ -85,7 +75,6 @@ export async function ingestGSCData(
     console.log(`[ingestGSCData] Starting GSC data ingestion for ${siteUrl} from ${startDate} to ${endDate}.`);
     let totalRowsWritten = 0;
 
-    // Validate inputs
     if (!siteUrl || !startDate || !endDate) {
         console.error('[ingestGSCData] Error: siteUrl, startDate, and endDate must be provided.');
         return { success: false, totalRowsWritten: 0 };
@@ -110,7 +99,6 @@ export async function ingestGSCData(
             }
         } catch (error) {
             console.error(`[ingestGSCData] Failed to process data for ${currentDate}. Error:`, error);
-            // Continue to the next day
         }
     }
 
@@ -120,15 +108,6 @@ export async function ingestGSCData(
 
 /**
  * Data Fetching Function (fetchGSCDataForDate).
- * Handles the direct communication with the GSC API.
- * It must request the following dimensions: date, page, query, device, country, searchAppearance.
- * It must handle API pagination to ensure all data for a given day is retrieved.
- * It needs to have a robust retry mechanism with exponential backoff.
- *
- * @param gscClient The initialized GSC API client.
- * @param siteUrl The site property from GSC.
- * @param date The date to fetch data for in YYYY-MM-DD format.
- * @returns An array of raw row objects from the GSC API.
  */
 export async function fetchGSCDataForDate(
     gscClient: searchconsole_v1.Searchconsole,
@@ -137,7 +116,7 @@ export async function fetchGSCDataForDate(
 ): Promise<GscApiRow[]> {
     const allRows: GscApiRow[] = [];
     let startRow = 0;
-    const rowLimit = 25000; // GSC API max limit is 25,000
+    const rowLimit = 25000;
     let hasMore = true;
     let attempt = 0;
     const maxRetries = 5;
@@ -163,6 +142,7 @@ export async function fetchGSCDataForDate(
 
             const rows = response.data.rows;
             if (rows && rows.length > 0) {
+                // The response type is compatible with our GscApiRow
                 allRows.push(...rows);
                 startRow += rows.length;
                 hasMore = rows.length === rowLimit;
@@ -172,12 +152,12 @@ export async function fetchGSCDataForDate(
             } else {
                 hasMore = false;
             }
-            attempt = 0; // Reset retry counter on a successful API call
+            attempt = 0;
         } catch (error: any) {
             console.error(`[fetchGSCDataForDate] API Error on attempt ${attempt + 1}.`, error.message);
             if (attempt < maxRetries) {
                 attempt++;
-                const delay = Math.pow(2, attempt) * initialDelay + Math.random() * 1000; // Exponential backoff with jitter
+                const delay = Math.pow(2, attempt) * initialDelay + Math.random() * 1000;
                 console.log(`[fetchGSCDataForDate] Retrying in ${Math.round(delay / 1000)} seconds...`);
                 await new Promise(res => setTimeout(res, delay));
             } else {
@@ -193,47 +173,35 @@ export async function fetchGSCDataForDate(
 
 /**
  * Data Transformation Function (normalizeRow).
- * This will be a pure function that takes a single raw data row from the GSC API
- * and transforms it into our desired schema.
- *
- * @param rawRow The raw row object from the GSC API.
- * @param siteUrl The site URL for which the data is being ingested.
- * @param date The date for which the data is being ingested.
- * @returns A single document object matching the Firestore schema.
  */
 export function normalizeRow(rawRow: GscApiRow, siteUrl: string, date: string): GscFirestoreDoc {
-    // Destructure with default values to handle potential nulls from the API
+    // FIX: Handle cases where keys can be null or individual keys can be null.
     const [
-        page = '',
-        query = '',
-        device = 'UNKNOWN',
-        country = 'UNKNOWN',
-        searchAppearance = 'NONE'
+        page,
+        query,
+        device,
+        country,
+        searchAppearance
     ] = rawRow.keys || [];
 
-    // URL Normalization
-    let normalizedUrl = page || '';
+    const finalPage = page || '';
+    let normalizedUrl = finalPage;
     try {
-        const url = new URL(page || '');
-        // 1. Remove all utm_* tracking parameters.
+        const url = new URL(finalPage);
         url.searchParams.forEach((_, key) => {
             if (key.toLowerCase().startsWith('utm_')) {
                 url.searchParams.delete(key);
             }
         });
-        // 2. Convert the URL to lowercase (hostname and pathname).
-        // 3. Ensure a consistent trailing slash policy (always remove it).
         let path = url.pathname;
         if (path.length > 1 && path.endsWith('/')) {
             path = path.slice(0, -1);
         }
         normalizedUrl = `${url.protocol}//${url.hostname.toLowerCase()}${path}${url.search}`;
     } catch (e) {
-        // If URL is invalid, use the original string but log a warning.
-        if (page) console.warn(`[normalizeRow] Could not parse URL: '${page}'. Using as is.`);
-        normalizedUrl = page || 'INVALID_URL';
+        if (finalPage) console.warn(`[normalizeRow] Could not parse URL: '${finalPage}'. Using as is.`);
+        normalizedUrl = finalPage || 'INVALID_URL';
     }
-
 
     return {
         siteUrl,
@@ -244,9 +212,9 @@ export function normalizeRow(rawRow: GscApiRow, siteUrl: string, date: string): 
         clicks: rawRow.clicks || 0,
         position: rawRow.position || 0,
         ctr: rawRow.ctr || 0,
-        device,
-        country: country ? country.toUpperCase() : 'UNKNOWN', // e.g., 'usa' -> 'USA'
-        searchAppearance,
+        device: device || 'UNKNOWN',
+        country: (country || 'zzz').toUpperCase(), // Use 'zzz' for unknown country code as per ISO 3166
+        searchAppearance: searchAppearance || 'NONE',
         ingestedAt: FieldValue.serverTimestamp(),
     };
 }
@@ -254,27 +222,20 @@ export function normalizeRow(rawRow: GscApiRow, siteUrl: string, date: string): 
 
 /**
  * Data Loading Function (writeToFirestoreInBatches).
- * This function will receive an array of normalized data rows.
- * To write data efficiently and avoid hitting Firestore limits, it must use batched writes.
- * It will chunk the data into groups of 500.
- *
- * @param db The Firestore instance.
- * @param collectionPath The path to the Firestore collection.
- * @param documents The array of documents to write.
  */
 export async function writeToFirestoreInBatches(
     db: FirebaseFirestore.Firestore,
     collectionPath: string,
     documents: GscFirestoreDoc[]
 ): Promise<void> {
-    const batchSize = 500; // Firestore limit
+    const batchSize = 500;
     console.log(`[writeToFirestoreInBatches] Writing ${documents.length} documents to '${collectionPath}' in batches of ${batchSize}.`);
 
     for (let i = 0; i < documents.length; i += batchSize) {
         const chunk = documents.slice(i, i + batchSize);
         const batch = db.batch();
         chunk.forEach(doc => {
-            const docRef = db.collection(collectionPath).doc(); // Auto-generate document ID
+            const docRef = db.collection(collectionPath).doc();
             batch.set(docRef, doc);
         });
         try {
@@ -282,7 +243,6 @@ export async function writeToFirestoreInBatches(
             console.log(`[writeToFirestoreInBatches] Committed a batch of ${chunk.length} documents.`);
         } catch (error) {
             console.error(`[writeToFirestoreInBatches] Error committing batch.`, error);
-            // Depending on requirements, you might want to re-throw or handle this differently
             throw error;
         }
     }
