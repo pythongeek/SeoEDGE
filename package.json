@@ -2,9 +2,11 @@
   "name": "app",
   "version": "1.0.0",
   "description": "[start of file] filename=\"README.md\"",
-  "main": "index.js",
+  "main": "dist/index.js",
   "scripts": {
-    "test": "jest"
+    "test": "jest",
+    "build": "tsc",
+    "start": "node dist/services/ingestion/gsc.js"
   },
   "repository": {
     "type": "git",
