@@ -27,11 +27,11 @@ initializeApp({
 const db = getFirestore();
 
 // Initialize the Google Search Console API client.
-// FIX: Explicitly pass credentials to avoid type conflicts between Firebase and Google Auth libraries.
 const auth = new GoogleAuth({
     credentials: {
-        client_email: serviceAccount.client_email,
-        private_key: serviceAccount.private_key,
+        // FIX: Use camelCase properties from the ServiceAccount type
+        client_email: serviceAccount.clientEmail,
+        private_key: serviceAccount.privateKey,
     },
     scopes: ['https://www.googleapis.com/auth/webmasters.readonly'],
 });
@@ -44,7 +44,6 @@ const gscClient = searchconsole({
 
 // --- Type Definitions ---
 
-// FIX: Use the official type from the library to avoid mismatches.
 type GscApiRow = searchconsole_v1.Schema$ApiDataRow;
 
 // Our Firestore document schema
@@ -142,7 +141,6 @@ export async function fetchGSCDataForDate(
 
             const rows = response.data.rows;
             if (rows && rows.length > 0) {
-                // The response type is compatible with our GscApiRow
                 allRows.push(...rows);
                 startRow += rows.length;
                 hasMore = rows.length === rowLimit;
@@ -175,7 +173,6 @@ export async function fetchGSCDataForDate(
  * Data Transformation Function (normalizeRow).
  */
 export function normalizeRow(rawRow: GscApiRow, siteUrl: string, date: string): GscFirestoreDoc {
-    // FIX: Handle cases where keys can be null or individual keys can be null.
     const [
         page,
         query,
@@ -213,7 +210,7 @@ export function normalizeRow(rawRow: GscApiRow, siteUrl: string, date: string): 
         position: rawRow.position || 0,
         ctr: rawRow.ctr || 0,
         device: device || 'UNKNOWN',
-        country: (country || 'zzz').toUpperCase(), // Use 'zzz' for unknown country code as per ISO 3166
+        country: (country || 'zzz').toUpperCase(),
         searchAppearance: searchAppearance || 'NONE',
         ingestedAt: FieldValue.serverTimestamp(),
     };
